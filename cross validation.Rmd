@@ -19,14 +19,21 @@ options(
 )
 scale_colour_discrete = scale_color_viridis_d
 scale_fill_discrete = scale_fill_viridis_d
-set.seed(1)
+set.seed(1) # sets a seed for reproducibility
 ```
 
+is a resampling procedure used to evaluate machine learning models on a limited data sample. is used to estimate the skill of a machine learning model on unseen data. how the model is expected to perform in general when used to make predictions on data not used during the training of the model.  
+k refers to the number of groups that a given data sample is to be split into
+Implement cross validation to **assess the predictive value** of a model using tools for iteration
+full data will be split
+the we build model
+training is data you use to build model
+testing is data you use to evaluate out-of-sample fit
 
-
-## Simulate data
+## 1.Simulate data
 
 ```{r}
+# creat a non linear model
 nonlin_df = 
   tibble(
     id = 1:100,
@@ -36,36 +43,38 @@ nonlin_df =
 ```
 
 
-Look at the data
-
-
+Look at the data: 
 ```{r}
+#you could not fit a line cross the data, so our goal is to fit a line by cross validation
 nonlin_df %>% 
   ggplot(aes(x = x, y = y)) + 
   geom_point()
 ```
 
-## Cross validation -- by hand
+## 2. Cross validation -- by hand
 
-Get training and testing datasets
-
+**Get training and testing datasets**
+ * split this data into training and test sets (using anti_join!!), and replot showing the split. Our goal will be to use the training data (in black) to build candidate models, and then see how those models predict in the testing data (in red).
 ```{r}
+# get a fix number(80 rows) by sample_n() from nonlin_df
+# then anti_join(), get data from nonlin_df and that not in train_df
 train_df = sample_n(nonlin_df, size = 80)
 test_df = anti_join(nonlin_df, train_df, by = "id")
 ```
 
+**Fit three models**  
 
-Fit three models. 
 
 ```{r}
+# lm() y against x
+# gam() y is a smooth function of x
+# 
 linear_mod = lm(y ~ x, data = train_df)
 smooth_mod = gam(y ~ s(x), data = train_df)
 wiggly_mod = gam(y ~ s(x, k = 30), sp = 10e-6, data = train_df)
-```
 
-can I see what i just did ...
+#add_prediction(): add a column of fitted value
 
-```{r}
 train_df %>% 
   add_predictions(wiggly_mod) %>% 
   ggplot(aes(x = x, y = y)) + 
@@ -73,7 +82,11 @@ train_df %>%
   geom_line(aes(y = pred), color = "red")
 ```
 
+show the three model in one plot
+* the linear model is too simple and, no matter what training data we use, will never capture the true relationship between variables,  it will be consistently wrong due to its simplicity, and is therefore biased.
+* The wiggly fit, on the other hand, is chasing data points and will change a lot from one training dataset to the the next – it will be consistently wrong due to its complexity, and is therefore highly variable. Both are bad!
 ```{r}
+# gather_predictions() is in modelr package
 train_df %>% 
   gather_predictions(linear_mod, smooth_mod, wiggly_mod) %>% 
   ggplot(aes(x = x, y = y)) + 
@@ -82,8 +95,8 @@ train_df %>%
   facet_grid(. ~ model)
 ```
 
-Look at prediction accuracy. 
-
+**Look at prediction accuracy by root mean squared errors (RMSEs)**
+* the smooth fit is better than the wiggly fit.(smaller emse) However, to get a sense of model stability we really need to iterate this whole process. Of course, this could be done using loops but that’s a hassle
 ```{r}
 rmse(linear_mod, test_df)
 rmse(smooth_mod, test_df)
@@ -91,9 +104,11 @@ rmse(wiggly_mod, test_df)
 ```
 
 
-## Cross validation using `modelr`
+## 3. Cross validation using `modelr`
 
 ```{r}
+# creat a cv data frame that stores the datasets using list columns.
+# 100 train 
 cv_df = 
   crossv_mc(nonlin_df, 100)
 ```
@@ -101,11 +116,13 @@ cv_df =
 What is happening here ..
 
 ```{r}
+# it’s not compatible with gam(), so we have to convert each training and testing dataset by the following code. ignore the code if you use lm()
 cv_df %>% pull(train) %>% .[[1]] %>% as_tibble()
 cv_df %>% pull(test) %>% .[[1]] %>% as_tibble()
 ```
 
 ```{r}
+# map across the train datasets to as.tibble
 cv_df = 
   cv_df %>% 
   mutate(
@@ -115,10 +132,11 @@ cv_df =
 ```
 
 
-Let's try to fit models and get RMSEs for them.
-
+**Let's try to fit models and get RMSEs for them.**
+I now have many training and testing datasets, and I’d like to fit my candidate models above and assess prediction accuracy as I did for the single training / testing split. To do this, I’ll fit models and obtain RMSEs using mutate + map & map2.
 
 ```{r}
+# map acorss the traim column with function lm()
 cv_df = 
   cv_df %>% 
   mutate(
@@ -126,6 +144,9 @@ cv_df =
     smooth_mod = map(.x = train, ~gam(y ~ s(x), data = .x)),
     wiggly_mod = map(.x = train, ~gam(y ~ s(x, k = 30), sp = 10e-6, data = .x))
   ) %>% 
+  
+# map2_dbl() map across two elements, one is linear_mod and anather is test by function rmse()
+  
   mutate(
     rmse_linear = map2_dbl(.x = linear_mod, .y = test, ~rmse(model = .x, data = .y)),
     rmse_smooth = map2_dbl(.x = smooth_mod, .y = test, ~rmse(model = .x, data = .y)),
@@ -133,8 +154,10 @@ cv_df =
   )
 ```
 
-What do these results say about the model choices?
+**What do these results say about the model choices?**
+Repeating the split is helpful – now we get a sense of variance in prediction error and can compare prediction error distributions across methods. The smooth fit is a clear winner!
 
+It’s worth remembering, though, that this isn’t testing a null hypothesis and there aren’t p-values as a result
 ```{r}
 cv_df %>% 
   select(starts_with("rmse")) %>% 
@@ -164,7 +187,7 @@ cv_df %>%
 ```
 
 
-## Try on a real dataset. 
+## 4. Try on a real dataset. 
 
 import my data
 
@@ -176,8 +199,8 @@ child_growth_df =
   )
 ```
 
-weight vs arm circumference
-
+**weight vs arm circumference**
+The plots suggests some non-linearity, especially at the low end of the weight distribution. We’ll try three models: a linear fit; a piecewise linear fit; and a smooth fit using gam. For the piecewise linear fit, we need to add a “change point term” to our dataframe: weight_cp (Like additive models, for now it’s not critical that you understand everything about a piecewise linear fit – we’ll see a plot of the results soon, and the intuition from that is enough for our purposes.)
 ```{r}
 child_growth_df %>% 
   ggplot(aes(x = weight, y = armc)) + 
@@ -191,7 +214,7 @@ linear_mod = lm(armc ~ weight, data = child_growth_df)
 pwlin_mod = lm(armc ~ weight + weight_cp, data = child_growth_df)
 smooth_mod = gam(armc ~ s(weight), data = child_growth_df)
 ```
-
+It’s not clear which is best – the linear model is maybe too simple, but the piecewise and non-linear models are pretty similar! Better check prediction errors using the same process as before – again, since I want to fit a gam model, I have to convert the resample objects produced by crossv_mc to dataframes, but wouldn’t have to do this if I only wanted to compare the linear and piecewise models.
 ```{r}
 child_growth_df %>% 
   gather_predictions(linear_mod, pwlin_mod, smooth_mod) %>% 
@@ -202,7 +225,7 @@ child_growth_df %>%
 ```
 
 
-Try to understand model fit using CV. 
+**Try to understand model fit using CV.** 
 
 ```{r}
 cv_df = 
@@ -214,8 +237,10 @@ cv_df =
 ```
 
 See if i can fit the models to the splits ...
-
+use mutate + map & map2 to fit models to training data and obtain corresponding RMSEs for the testing data.
 ```{r}
+# map across train column by function lm()
+# map across linear_mod and test column by function rmse()
 cv_df = 
   cv_df %>% 
   mutate(
@@ -244,3 +269,5 @@ cv_df %>%
   ggplot(aes(x = model, y = rmse)) +
   geom_violin()
 ```
+
+for pwlin model we can easily get expected change in y for one unit change in x since the slop is obious.
